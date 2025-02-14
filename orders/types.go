@@ -1,7 +1,14 @@
 package main
 
+import (
+	"context"
+
+	pb "github.com/francopoffo/common/api"
+)
+
 type OrderService interface {
-	ProcessOrder(orderId string) error
+	ProcessOrder(context.Context, string) error
+	ValidateOrder(context.Context, *pb.CreateOrderRequest) error
 }
 
 type OrderStore interface {

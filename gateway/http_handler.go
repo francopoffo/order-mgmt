@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/francopoffo/common"
 	pb "github.com/francopoffo/common/api"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type handler struct {
@@ -29,5 +32,39 @@ func (h *handler) HandleCreateOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.client.ProcessOrder(r.Context(), &pb.CreateOrderRequest{CustomerId: customerID, Items: items})
+	if err := validateItems(items); err != nil {
+		common.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	o, err := h.client.ProcessOrder(r.Context(), &pb.CreateOrderRequest{CustomerId: customerID, Items: items})
+
+	rStatus := status.Convert(err)
+
+	if rStatus != nil {
+		if rStatus.Code() == codes.InvalidArgument {
+			common.WriteError(w, http.StatusBadRequest, rStatus.Message())
+			return
+		}
+	}
+
+	common.WriteJSON(w, http.StatusOK, o)
+}
+
+func validateItems(items []*pb.ItemWithQuantity) error {
+	if len(items) == 0 {
+		return common.ErrNoItems
+	}
+
+	for _, item := range items {
+		if item.Quantity <= 0 {
+			return errors.New("quantity cannot be zero or lower")
+		}
+
+		if item.ID == "" {
+			return errors.New("item id cannot be empty")
+		}
+	}
+
+	return nil
 }
