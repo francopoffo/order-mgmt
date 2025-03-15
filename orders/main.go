@@ -4,17 +4,46 @@ import (
 	"context"
 	"log"
 	"net"
+	"time"
 
 	"github.com/francopoffo/common"
+	"github.com/francopoffo/common/discovery"
+	_ "github.com/joho/godotenv/autoload"
 	"google.golang.org/grpc"
 )
 
 var (
-	grpcAddrr = common.GetEnv("GRPC_ADDRESS", "locahost:2000")
+	serviceName = "orders"
+	grpcAddrr   = common.GetEnv("GRPC_ADDRESS", "locahost:2000")
+	consulAddr  = common.GetEnv("CONSUL_ADDR", "localhost:8500")
 )
 
 func main() {
+
+	registry, err := discovery.NewRegistry(consulAddr, serviceName)
+
+	if err != nil {
+		panic(err)
+	}
+
 	ctx := context.Background()
+	instanceID := discovery.GenerateInstanceID(serviceName)
+
+	if err := registry.Register(ctx, instanceID, serviceName, grpcAddrr); err != nil {
+		panic(err)
+	}
+
+	go func() {
+
+		for {
+			if err := registry.HealthCheck(instanceID, serviceName); err != nil {
+				log.Fatal("failed to health check")
+			}
+			time.Sleep(time.Second * 2)
+		}
+	}()
+
+	defer registry.Deregister(ctx, instanceID, serviceName)
 	grpcServer := grpc.NewServer()
 	l, err := net.Listen("tcp", grpcAddrr)
 	if err != nil {

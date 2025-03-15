@@ -1,33 +1,54 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/francopoffo/common"
-	pb "github.com/francopoffo/common/api"
+	"github.com/francopoffo/common/discovery"
+	"github.com/francopoffo/gateway/gateway"
 	_ "github.com/joho/godotenv/autoload"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 var (
-	httpAddr         = common.GetEnv("HTTP_ADRRESS", ":8080")
-	orderServiceAddr = common.GetEnv("ORDER_SERVICE_ADDRESS", "localhost:2000")
+	serviceName = "gateway"
+	httpAddr    = common.GetEnv("HTTP_ADRRESS", ":8080")
+	consulAddr  = common.GetEnv("CONSUL_ADDR", "localhost:8500")
 )
 
 func main() {
-	conn, err := grpc.NewClient(orderServiceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		log.Fatalf("failed to dial server: %s", err)
-	}
-	defer conn.Close()
-	log.Printf("dialing orders service at %s", orderServiceAddr)
 
-	c := pb.NewOrderServiceClient(conn)
+	registry, err := discovery.NewRegistry(consulAddr, serviceName)
+
+	if err != nil {
+		panic(err)
+	}
+
+	ctx := context.Background()
+	instanceID := discovery.GenerateInstanceID(serviceName)
+
+	if err := registry.Register(ctx, instanceID, serviceName, httpAddr); err != nil {
+		panic(err)
+	}
+
+	go func() {
+
+		for {
+			if err := registry.HealthCheck(instanceID, serviceName); err != nil {
+				log.Fatal("failed to health check")
+			}
+			time.Sleep(time.Second * 2)
+		}
+	}()
+
+	defer registry.Deregister(ctx, instanceID, serviceName)
 
 	mux := http.NewServeMux()
-	handler := NewHandler(c)
+	ordersGateway := gateway.NewGRPCGateway(*registry)
+
+	handler := NewHandler(ordersGateway)
 	handler.registerRoutes(mux)
 
 	log.Printf("starting http server at %s", httpAddr)
