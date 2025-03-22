@@ -7,15 +7,20 @@ import (
 	"time"
 
 	"github.com/francopoffo/common"
+	"github.com/francopoffo/common/broker"
 	"github.com/francopoffo/common/discovery"
 	_ "github.com/joho/godotenv/autoload"
 	"google.golang.org/grpc"
 )
 
 var (
-	serviceName = "orders"
-	grpcAddrr   = common.GetEnv("GRPC_ADDRESS", "locahost:2000")
-	consulAddr  = common.GetEnv("CONSUL_ADDR", "localhost:8500")
+	serviceName  = "orders"
+	grpcAddrr    = common.GetEnv("GRPC_ADDRESS", "locahost:2000")
+	consulAddr   = common.GetEnv("CONSUL_ADDR", "localhost:8500")
+	amqpUser     = common.GetEnv("RABBITMQ_USER", "guest")
+	amqpPassword = common.GetEnv("RABBITMQ_USERWORD", "guest")
+	amqpHost     = common.GetEnv("RABBITMQ_HOST", "localhost")
+	amqpPort     = common.GetEnv("RABBITMQ_PORT", "5672")
 )
 
 func main() {
@@ -44,6 +49,13 @@ func main() {
 	}()
 
 	defer registry.Deregister(ctx, instanceID, serviceName)
+	ch, close := broker.Connect(amqpUser, amqpPassword, amqpHost, amqpPort)
+
+	defer func() {
+		close()
+		ch.Close()
+	}()
+
 	grpcServer := grpc.NewServer()
 	l, err := net.Listen("tcp", grpcAddrr)
 	if err != nil {
@@ -53,7 +65,7 @@ func main() {
 
 	store := NewStore()
 	service := NewOrderService(store)
-	NewGrpcHandler(grpcServer, service)
+	NewGrpcHandler(grpcServer, service, ch)
 
 	service.ProcessOrder(ctx, "1")
 
